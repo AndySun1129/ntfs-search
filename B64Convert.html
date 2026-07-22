@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>文件 Base64 编码/解码工具</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 30px auto; padding: 0 20px; }
+        .section { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 30px; background: #f9f9f9; }
+        .section h3 { margin-top: 0; color: #333; }
+        textarea { width: 100%; height: 200px; padding: 8px; box-sizing: border-box; font-family: 'Courier New', monospace; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 10px; margin-top: 10px; }
+        button:hover { background: #0056b3; }
+        button.green { background: #28a745; }
+        button.green:hover { background: #1e7e34; }
+        button.orange { background: #fd7e14; }
+        button.orange:hover { background: #e06b0a; }
+        .info { font-size: 13px; color: #666; margin-top: 8px; }
+        .file-info { margin-top: 10px; font-size: 13px; color: #555; }
+        #decodeStatus { color: #28a745; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>📁 文件 Base64 编码/解码工具</h1>
+    <p style="color: #555;">此工具完全在本地浏览器中运行，不会上传任何文件到服务器。</p>
+
+    <!-- ========== 编码区域 ========== -->
+    <div class="section">
+        <h3>🔒 编码：文件 → Base64 文本</h3>
+        <p>选择文件，将其转换为 Base64 纯文本（适合复制粘贴通过文本通道传输）。</p>
+        <input type="file" id="fileInput" />
+        <button id="encodeBtn" class="green">开始编码</button>
+        <button onclick="copyResult()">📋 复制结果</button>
+        <div class="file-info" id="fileInfo"></div>
+        <textarea id="encodeResult" placeholder="编码后的 Base64 文本将显示在此..."></textarea>
+    </div>
+
+    <!-- ========== 解码区域 ========== -->
+    <div class="section">
+        <h3>🔓 解码：Base64 文本 → 文件</h3>
+        <p>粘贴 Base64 文本，还原为原始文件并下载。</p>
+        <textarea id="decodeInput" placeholder="请在此粘贴需要解码的 Base64 文本..."></textarea>
+        <br />
+        <button id="decodeBtn" class="orange">解码并下载文件</button>
+        <span id="decodeStatus"></span>
+        <div class="info">提示：解码后会自动下载文件，请根据原始文件类型重命名（如 .dll、.exe、.png 等）。</div>
+    </div>
+
+    <script>
+        // ============================================================
+        // 1. 编码逻辑：文件 → Base64
+        // ============================================================
+        const fileInput = document.getElementById('fileInput');
+        const encodeResult = document.getElementById('encodeResult');
+        const fileInfo = document.getElementById('fileInfo');
+
+        document.getElementById('encodeBtn').addEventListener('click', function() {
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('请先选择文件！');
+                return;
+            }
+
+            fileInfo.textContent = `📄 文件名：${file.name}  |  大小：${(file.size / 1024).toFixed(2)} KB`;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const base64String = event.target.result.split(',')[1];
+                encodeResult.value = base64String;
+                console.log('✅ 编码完成，Base64 长度：', base64String.length);
+            };
+            reader.onerror = function(error) {
+                alert('读取文件失败：' + error.message);
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // 复制编码结果
+        function copyResult() {
+            const text = encodeResult.value;
+            if (!text) {
+                alert('没有可复制的内容！');
+                return;
+            }
+            navigator.clipboard.writeText(text).then(() => {
+                alert('✅ Base64 文本已复制到剪贴板！');
+            }).catch(() => {
+                // 降级方案
+                encodeResult.select();
+                document.execCommand('copy');
+                alert('✅ 已复制！');
+            });
+        }
+
+        // ============================================================
+        // 2. 解码逻辑：Base64 → 文件
+        // ============================================================
+        const decodeInput = document.getElementById('decodeInput');
+        const decodeStatus = document.getElementById('decodeStatus');
+
+        document.getElementById('decodeBtn').addEventListener('click', function() {
+            const base64Text = decodeInput.value.trim();
+            if (!base64Text) {
+                alert('请先粘贴 Base64 文本！');
+                return;
+            }
+
+            // 简单校验：移除可能的空白字符
+            let cleanBase64 = base64Text.replace(/\s/g, '');
+
+            try {
+                // 使用 atob 解码
+                const binaryString = atob(cleanBase64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // 创建 Blob
+                const blob = new Blob([bytes]);
+
+                // 让用户输入文件名
+                const fileName = prompt('请输入要保存的文件名（含扩展名）：', 'restored_file.dll');
+                if (fileName === null) {
+                    decodeStatus.textContent = '⚠️ 已取消下载';
+                    decodeStatus.style.color = '#fd7e14';
+                    return;
+                }
+
+                // 触发下载
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = fileName || 'restored_file.bin';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                // 释放内存
+                setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+
+                decodeStatus.textContent = `✅ 解码成功！已下载：${fileName}（${(blob.size / 1024).toFixed(2)} KB）`;
+                decodeStatus.style.color = '#28a745';
+
+            } catch (error) {
+                decodeStatus.textContent = '❌ 解码失败：请确认粘贴的是有效的 Base64 文本。';
+                decodeStatus.style.color = '#dc3545';
+                console.error('解码错误：', error);
+            }
+        });
+
+        // ============================================================
+        // 3. 辅助：支持从剪贴板直接粘贴（快捷键 Ctrl+V）
+        // ============================================================
+        decodeInput.addEventListener('paste', function() {
+            // 稍微延迟一下让内容填入
+            setTimeout(() => {
+                decodeStatus.textContent = '📥 已粘贴，点击「解码并下载文件」即可还原。';
+                decodeStatus.style.color = '#007bff';
+            }, 100);
+        });
+
+        console.log('🔧 工具已加载完成。');
+    </script>
+</body>
+</html>
