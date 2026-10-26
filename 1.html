@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>JCL DSN 流向图</title>
+<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 20px;
+    background: #f5f7fa; color: #333;
+  }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .subtitle { color: #666; font-size: 14px; margin-bottom: 16px; }
+  .layout { display: flex; gap: 20px; align-items: flex-start; }
+  .panel {
+    background: #fff; border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 16px;
+  }
+  #jcl-panel { flex: 0 0 420px; max-height: 660px; overflow: auto; }
+  #graph-panel { flex: 1 1 auto; }
+  #mynetwork { width: 100%; height: 620px; border: 1px solid #e0e0e0; border-radius: 6px; }
+  pre {
+    background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 6px;
+    font-size: 12.5px; line-height: 1.5; overflow-x: auto;
+    font-family: "Consolas", "Courier New", monospace;
+  }
+  .legend {
+    display: flex; gap: 18px; font-size: 13px; color: #555;
+    margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .legend span::before {
+    content: ""; display: inline-block; width: 12px; height: 12px;
+    border-radius: 50%; margin-right: 6px; vertical-align: middle;
+  }
+  .legend .step::before { background: #4A90D9; border-radius: 3px; }
+  .legend .dsn::before  { background: #F5A623; }
+  .legend .hl::before   { background: #E8590C; }
+  .legend .fade::before { background: #DDDDDD; }
+
+  /* DSN 信息栏 */
+  .info-bar {
+    min-height: 56px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #475569;
+  }
+  .info-bar .info-title {
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 6px;
+    font-size: 14px;
+  }
+  .info-bar .info-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .info-bar .info-item {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+  }
+  .info-bar .info-label {
+    color: #64748b;
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .info-bar .info-value {
+    font-family: Consolas, monospace;
+    word-break: break-all;
+    color: #1e293b;
+  }
+  .info-bar .step-tag {
+    display: inline-block;
+    padding: 1px 7px;
+    background: #e0f2fe;
+    color: #0369a1;
+    border-radius: 10px;
+    font-size: 12px;
+    margin-right: 4px;
+    font-family: Consolas, monospace;
+  }
+
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 1000;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: #fff; border-radius: 10px;
+    width: 560px; max-width: 92vw;
+    max-height: 85vh; overflow: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.28);
+    animation: pop .18s ease-out;
+  }
+  @keyframes pop {
+    from { transform: scale(0.96); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid #eee;
+    background: #f8fafc; border-radius: 10px 10px 0 0;
+  }
+  .modal-header h2 { margin: 0; font-size: 17px; color: #2c3e50; }
+  .modal-close {
+    border: none; background: transparent; font-size: 22px;
+    cursor: pointer; color: #888; line-height: 1;
+  }
+  .modal-close:hover { color: #e74c3c; }
+  .modal-body { padding: 18px 20px; }
+  .info-row { display: flex; margin-bottom: 10px; font-size: 14px; }
+  .info-row .k { flex: 0 0 96px; color: #888; }
+  .info-row .v { flex: 1 1 auto; color: #222; word-break: break-all; }
+  .dsn-list { margin: 4px 0 0 0; padding-left: 18px; }
+  .dsn-list li { margin-bottom: 4px; font-family: Consolas, monospace; font-size: 13px; }
+  .dsn-list li .logical { color: #888; margin-left: 6px; font-size: 12px; }
+  .badge {
+    display: inline-block; padding: 1px 8px; border-radius: 10px;
+    font-size: 12px; color: #fff; margin-right: 6px;
+  }
+  .badge.read  { background: #27ae60; }
+  .badge.write { background: #e67e22; }
+</style>
+</head>
+<body>
+<h1 id="jobTitle">MYJOB - JCL 作业流 DSN 流向图</h1>
+<div class="subtitle">
+  点击 <b>STEP</b> 节点查看详细信息；点击 <b>DSN</b> 圆点查看数据集信息并高亮链路；点击空白处恢复。
+</div>
+<div class="layout">
+  <div class="panel" id="jcl-panel">
+    <h3 style="margin-top:0;">JCL 源码（示例）</h3>
+    <pre>
+//MYJOB    JOB (ACCT),'DSN FLOW DEMO',
+//             CLASS=A,MSGCLASS=X
+//STEP01   EXEC PGM=IEBGENER
+//SYSUT1   DD DSN=INPUT.RAW.DATA,DISP=SHR
+//SYSUT2   DD DSN=WORK.CLEAN.DATA,DISP=(NEW,CATLG)
+//STEP02   EXEC PGM=SORT
+//SORTIN   DD DSN=WORK.CLEAN.DATA,DISP=SHR
+//SORTOUT  DD DSN=WORK.SORTED.DATA,DISP=(NEW,CATLG)
+//STEP03   EXEC PGM=VALIDATE
+//INDD     DD DSN=WORK.SORTED.DATA,DISP=SHR
+//OUTDD    DD DSN=WORK.VALID.DATA,DISP=(NEW,CATLG)
+//STEP04   EXEC PGM=ENRICH
+//INDD     DD DSN=WORK.VALID.DATA,DISP=SHR
+//REFDD    DD DSN=REF.CUSTOMER.MASTER,DISP=SHR
+//OUTDD    DD DSN=WORK.ENRICHED.DATA,DISP=(NEW,CATLG)
+//STEP05   EXEC PGM=AGGREGATE
+//INDD     DD DSN=WORK.ENRICHED.DATA,DISP=SHR
+//OUTDD    DD DSN=WORK.AGG.DATA,DISP=(NEW,CATLG)
+//STEP06   EXEC PGM=CALCRATE
+//INDD     DD DSN=WORK.AGG.DATA,DISP=SHR
+//OUTDD    DD DSN=WORK.RATE.DATA,DISP=(NEW,CATLG)
+//STEP07   EXEC PGM=FORMAT
+//INDD     DD DSN=WORK.RATE.DATA,DISP=SHR
+//OUTDD    DD DSN=REPORT.FINAL.TXT,DISP=(NEW,CATLG)
+//STEP08   EXEC PGM=ARCHIVE
+//INDD     DD DSN=WORK.ENRICHED.DATA,DISP=SHR
+//OUTDD    DD DSN=ARCHIVE.ENRICHED.DATA,DISP=(NEW,CATLG)
+//STEP09   EXEC PGM=AUDIT
+//INDD     DD DSN=WORK.VALID.DATA,DISP=SHR
+//OUTDD    DD DSN=AUDIT.LOG.TXT,DISP=(NEW,CATLG)
+//STEP10   EXEC PGM=NOTIFY
+//INDD     DD DSN=REPORT.FINAL.TXT,DISP=SHR
+//OUTDD    DD DSN=NOTIFY.OUT.LOG,DISP=(NEW,CATLG)
+    </pre>
+  </div>
+  <div class="panel" id="graph-panel">
+    <!-- DSN 信息展示区 -->
+    <div class="info-bar" id="dsnInfoBar">
+      <div style="color:#94a3b8;">点击 DSN 圆点节点，在此处显示数据集详细信息</div>
+    </div>
+
+    <div class="legend">
+      <span class="step">STEP（按执行顺序编号）</span>
+      <span class="dsn">DSN 数据集（文字在外侧）</span>
+      <span class="hl">选中 / 关联链路</span>
+      <span class="fade">无关节点</span>
+    </div>
+    <div id="mynetwork"></div>
+  </div>
+</div>
+<div class="modal-overlay" id="stepModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">STEP 详情</h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+<script>
+// =========================================================
+// 0. 基础配置
+// =========================================================
+var jobName = 'MYJOB';
+document.getElementById('jobTitle').textContent = jobName + ' - JCL 作业流 DSN 流向图';
+
+// 数字转带圈序号
+function getCircleNum(n) {
+  const circles = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩',
+                '⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
+  return circles[n-1] || n;
+}
+
+// =========================================================
+// 1. 数据模型
+// =========================================================
+var dsnDefs = {
+  D_INPUT:    { physicalName: 'MYDATA.PROD.INPUT.RAW',      logicalName: 'INPUT.RAW.DATA' },
+  D_CLEAN:    { physicalName: 'MYDATA.PROD.CLEAN',          logicalName: 'WORK.CLEAN.DATA' },
+  D_SORTED:   { physicalName: 'MYDATA.PROD.SORTED',         logicalName: 'WORK.SORTED.DATA' },
+  D_VALID:    { physicalName: 'MYDATA.PROD.VALID',          logicalName: 'WORK.VALID.DATA' },
+  D_ENRICHED: { physicalName: 'MYDATA.PROD.ENRICHED',       logicalName: 'WORK.ENRICHED.DATA' },
+  D_AGG:      { physicalName: 'MYDATA.PROD.AGG',            logicalName: 'WORK.AGG.DATA' },
+  D_RATE:     { physicalName: 'MYDATA.PROD.RATE',           logicalName: 'WORK.RATE.DATA' },
+  D_REPORT:   { physicalName: 'MYDATA.PROD.REPORT.FINAL',   logicalName: 'REPORT.FINAL.TXT' },
+  D_ARCHIVE:  { physicalName: 'MYDATA.ARCH.ENRICHED.DATA',  logicalName: 'ARCHIVE.ENRICHED.DATA' },
+  D_AUDIT:    { physicalName: 'MYDATA.LOG.AUDIT',           logicalName: 'AUDIT.LOG.TXT' },
+  D_NOTIFY:   { physicalName: 'MYDATA.LOG.NOTIFY.OUT',      logicalName: 'NOTIFY.OUT.LOG' },
+  D_REF:      { physicalName: 'MYDATA.REF.CUSTOMER.MASTER', logicalName: 'REF.CUSTOMER.MASTER' }
+};
+var stepDefs = [
+  { id: 'S01', stepName: 'STEP01', program: 'IEBGENER',  read: ['D_INPUT'],          write: ['D_CLEAN'] },
+  { id: 'S02', stepName: 'STEP02', program: 'SORT',      read: ['D_CLEAN'],          write: ['D_SORTED'] },
+  { id: 'S03', stepName: 'STEP03', program: 'VALIDATE',  read: ['D_SORTED'],         write: ['D_VALID'] },
+  { id: 'S04', stepName: 'STEP04', program: 'ENRICH',    read: ['D_VALID', 'D_REF'], write: ['D_ENRICHED'] },
+  { id: 'S05', stepName: 'STEP05', program: 'AGGREGATE', read: ['D_ENRICHED'],       write: ['D_AGG'] },
+  { id: 'S06', stepName: 'STEP06', program: 'CALCRATE',  read: ['D_AGG'],            write: ['D_RATE'] },
+  { id: 'S07', stepName: 'STEP07', program: 'FORMAT',    read: ['D_RATE'],           write: ['D_REPORT'] },
+  { id: 'S08', stepName: 'STEP08', program: 'ARCHIVE',   read: ['D_ENRICHED'],       write: ['D_ARCHIVE'] },
+  { id: 'S09', stepName: 'STEP09', program: 'AUDIT',     read: ['D_VALID'],          write: ['D_AUDIT'] },
+  { id: 'S10', stepName: 'STEP10', program: 'NOTIFY',    read: ['D_REPORT'],         write: ['D_NOTIFY'] }
+];
+
+// =========================================================
+// 2. 样式常量
+// =========================================================
+var STEP_COLOR   = '#4A90D9';
+var STEP_BORDER  = '#2F6BA8';
+var STEP_FONT    = '#ffffff';
+var DSN_COLOR    = '#F5A623';
+var DSN_BORDER   = '#B87A0E';
+var DSN_FONT     = '#333333';
+var HL_COLOR     = '#E8590C';
+var HL_BORDER    = '#7a1f00';
+var FADE_COLOR   = '#DDDDDD';
+var FADE_BORDER  = '#CCCCCC';
+var EDGE_DEFAULT = '#A0A0A0';
+var EDGE_HL      = '#E8590C';
+var EDGE_FADE    = 'rgba(220,220,220,0.25)';
+
+const DSN_LABEL_POS = 'right';
+const DSN_LABEL_OFFSET = { x: 12, y: 0 };
+const DSN_DEFAULT_SIZE = 7;
+const DSN_HIGHLIGHT_SIZE = 12;
+
+// =========================================================
+// 3. 构造节点与边
+// =========================================================
+function buildNodes() {
+  var arr = [];
+
+  // STEP 节点：序号在右上角（纯文本右对齐实现，稳定不崩）
+  stepDefs.forEach(function (s, idx) {
+    var seq = getCircleNum(idx + 1);
+    // 三行文本：第一行序号（右对齐=右上角），第二行STEP名，第三行程序名
+    var labelText = seq + '\n' + s.stepName + '\n' + s.program;
+
+    arr.push({
+      id: s.id,
+      label: labelText,
+      shape: 'box',
+      color: { background: STEP_COLOR, border: STEP_BORDER },
+      font: {
+        color: STEP_FONT,
+        size: 12,
+        face: 'Segoe UI',
+        align: 'right',  // 文本右对齐 → 序号自然在右上角
+        vadjust: 2
+      },
+      margin: { top: 8, bottom: 8, left: 12, right: 10 },
+      widthConstraint: { minimum: 90 },
+      _type: 'step'
+    });
+  });
+
+  // DSN 节点：圆点 + 右侧外置 label
+  Object.keys(dsnDefs).forEach(function (id) {
+    var d = dsnDefs[id];
+    var labelText = d.physicalName + '\n(' + d.logicalName + ')';
+    arr.push({
+      id: id,
+      label: labelText,
+      shape: 'dot',
+      size: DSN_DEFAULT_SIZE,
+      color: { background: DSN_COLOR, border: DSN_BORDER },
+      borderWidth: 1.5,
+      font: {
+        color: DSN_FONT,
+        size: 10.5,
+        face: 'Consolas'
+      },
+      labelPosition: DSN_LABEL_POS,
+      labelOffset: DSN_LABEL_OFFSET,
+      _type: 'dsn'
+    });
+  });
+  return arr;
+}
+
+function buildEdges() {
+  var arr = [];
+  var idx = 0;
+  stepDefs.forEach(function (s) {
+    s.write.forEach(function (dsnId) {
+      arr.push({
+        id: 'E' + (idx++),
+        from: s.id,
+        to: dsnId,
+        arrows: { to: { enabled: true, scaleFactor: 0.9 } },
+        color: { color: EDGE_DEFAULT, highlight: EDGE_HL },
+        width: 1.5,
+        smooth: { type: 'cubicBezier', roundness: 0.5 },
+        _kind: 'write'
+      });
+    });
+    s.read.forEach(function (dsnId) {
+      arr.push({
+        id: 'E' + (idx++),
+        from: dsnId,
+        to: s.id,
+        arrows: { to: { enabled: true, scaleFactor: 0.9 } },
+        color: { color: EDGE_DEFAULT, highlight: EDGE_HL },
+        width: 1.5,
+        smooth: { type: 'cubicBezier', roundness: 0.5 },
+        _kind: 'read'
+      });
+    });
+  });
+  return arr;
+}
+
+var nodes = new vis.DataSet(buildNodes());
+var edges = new vis.DataSet(buildEdges());
+
+// =========================================================
+// 4. 初始化 network
+// =========================================================
+var container = document.getElementById('mynetwork');
+var data = { nodes: nodes, edges: edges };
+//var options = {
+//  layout: { improvedLayout: true },
+//  physics: {
+//    enabled: true,
+//    solver: 'forceAtlas2Based',
+//    forceAtlas2Based: {
+//      gravitationalConstant: -120,
+//      centralGravity: 0.015,
+//      springLength: 170,
+//      springConstant: 0.08,
+//      avoidOverlap: 0.85
+//    },
+//    stabilization: { iterations: 300 }
+//  },
+//  interaction: {
+//    hover: true,
+//    tooltipDelay: 120,
+//    selectable: true,
+//    multiselect: false
+//  },
+//  nodes: {
+//    borderWidth: 1.5,
+//    shadow: { enabled: true, color: 'rgba(0,0,0,0.12)', size: 4, x: 1, y: 2 }
+//  },
+//  edges: {
+//    shadow: false,
+//    arrows: { to: { enabled: true } }
+//  }
+//};
+var options = {
+  layout: {
+    hierarchical: {
+      enabled: true,            // 开启层级布局
+      direction: 'LR',          // 从左到右流向（匹配JCL执行顺序）
+      sortMethod: 'directed',   // 严格按数据流方向分层
+      levelSeparation: 180,    // 层与层之间的水平距离
+      nodeSpacing: 80,         // 同一层节点之间的垂直距离
+      treeSpacing: 120,        // 独立子树之间的间距
+      shakeTowards: 'roots',   // 根节点靠左对齐
+      parentCentralization: 0.5
+    }
+  },
+  physics: {
+    enabled: false            // 层级布局关闭物理引擎，节点固定不飘动
+  },
+  interaction: {
+    hover: true,
+    tooltipDelay: 120,
+    selectable: true,
+    multiselect: false,
+    dragNodes: true          // 仍允许手动拖拽调整
+  },
+  nodes: {
+    borderWidth: 1.5,
+    shadow: { enabled: true, color: 'rgba(0,0,0,0.12)', size: 4, x: 1, y: 2 }
+  },
+  edges: {
+    shadow: false,
+    arrows: { to: { enabled: true, scaleFactor: 0.9 } },
+    smooth: { type: 'cubicBezier', roundness: 0.3 } // 减小弯曲度，更接近直线
+  }
+};
+
+
+var network = new vis.Network(container, data, options);
+
+// =========================================================
+// 5. 缓存默认样式
+// =========================================================
+var defaultNodeStyles = {};
+nodes.forEach(function (n) {
+  if (n._type === 'step') {
+    defaultNodeStyles[n.id] = {
+      label: n.label,
+      color: { background: STEP_COLOR, border: STEP_BORDER },
+      font: { color: STEP_FONT, size: 12, face: 'Segoe UI', align: 'right', vadjust: 2 }
+    };
+  } else {
+    defaultNodeStyles[n.id] = {
+      size: DSN_DEFAULT_SIZE,
+      color: { background: DSN_COLOR, border: DSN_BORDER },
+      font: { color: DSN_FONT, size: 10.5, face: 'Consolas' },
+      labelPosition: DSN_LABEL_POS,
+      labelOffset: DSN_LABEL_OFFSET
+    };
+  }
+});
+var defaultEdgeStyles = {};
+edges.forEach(function (e) {
+  defaultEdgeStyles[e.id] = {
+    color: { color: EDGE_DEFAULT, highlight: EDGE_HL },
+    width: 1.5
+  };
+});
+
+function resetStyles() {
+  nodes.update(Object.keys(defaultNodeStyles).map(function (id) {
+    return Object.assign({ id: id }, defaultNodeStyles[id]);
+  }));
+  edges.update(Object.keys(defaultEdgeStyles).map(function (id) {
+    return Object.assign({ id: id }, defaultEdgeStyles[id]);
+  }));
+  document.getElementById('dsnInfoBar').innerHTML = 
+    '<div style="color:#94a3b8;">点击 DSN 圆点节点，在此处显示数据集详细信息</div>';
+}
+
+// =========================================================
+// 6. DSN 高亮 + 顶部信息栏
+// =========================================================
+function highlightDsn(dsnId) {
+  var dsnInfo = dsnDefs[dsnId];
+  var writerSteps = network.getConnectedNodes(dsnId, 'to');
+  var readerSteps = network.getConnectedNodes(dsnId, 'from');
+
+  // 更新顶部信息栏
+  var writerNames = writerSteps.map(function(sid){
+    var s = stepDefs.find(function(x){ return x.id === sid; });
+    return '<span class="step-tag">' + s.stepName + '</span>';
+  }).join('');
+  var readerNames = readerSteps.map(function(sid){
+    var s = stepDefs.find(function(x){ return x.id === sid; });
+    return '<span class="step-tag">' + s.stepName + '</span>';
+  }).join('');
+
+  document.getElementById('dsnInfoBar').innerHTML = 
+    '<div class="info-title">📂 数据集信息</div>' +
+    '<div class="info-row">' +
+      '<div class="info-item"><span class="info-label">物理名：</span><span class="info-value">' + dsnInfo.physicalName + '</span></div>' +
+      '<div class="info-item"><span class="info-label">逻辑名：</span><span class="info-value">' + dsnInfo.logicalName + '</span></div>' +
+    '</div>' +
+    '<div class="info-row">' +
+      '<div class="info-item"><span class="info-label">写入步骤：</span><span class="info-value">' + (writerNames || '<span style="color:#999;">无</span>') + '</span></div>' +
+      '<div class="info-item"><span class="info-label">读取步骤：</span><span class="info-value">' + (readerNames || '<span style="color:#999;">无</span>') + '</span></div>' +
+    '</div>';
+
+  // 节点高亮
+  var keep = new Set([dsnId].concat(writerSteps).concat(readerSteps));
+  var relatedEdgeIds = new Set(network.getConnectedEdges(dsnId));
+  var nUpdates = [];
+
+  nodes.forEach(function (node) {
+    const base = defaultNodeStyles[node.id];
+    if (keep.has(node.id)) {
+      if (node.id === dsnId) {
+        // 选中DSN：圆点放大、文字红色加粗
+        nUpdates.push({
+          id: node.id,
+          size: DSN_HIGHLIGHT_SIZE,
+          color: { background: HL_COLOR, border: HL_BORDER },
+          borderWidth: 2.5,
+          font: {
+            color: '#ff0000',
+            bold: true,
+            size: 12,
+            face: 'Consolas'
+          },
+          labelPosition: DSN_LABEL_POS,
+          labelOffset: DSN_LABEL_OFFSET
+        });
+      } else {
+        // 关联节点保持原色
+        nUpdates.push({
+          id: node.id,
+          label: base.label,
+          color: base.color,
+          borderWidth: 1.5,
+          font: base.font
+        });
+      }
+    } else {
+      // 无关节点变灰
+      if (node._type === 'step') {
+        nUpdates.push({
+          id: node.id,
+          label: base.label,
+          color: { background: FADE_COLOR, border: FADE_BORDER },
+          borderWidth: 1,
+          font: { color: '#AAAAAA', size: 12, face: 'Segoe UI', align: 'right', vadjust: 2 }
+        });
+      } else {
+        nUpdates.push({
+          id: node.id,
+          size: DSN_DEFAULT_SIZE,
+          color: { background: FADE_COLOR, border: FADE_BORDER },
+          borderWidth: 1,
+          font: { color: '#AAAAAA', size: 10, face: 'Consolas' },
+          labelPosition: DSN_LABEL_POS,
+          labelOffset: DSN_LABEL_OFFSET
+        });
+      }
+    }
+  });
+  nodes.update(nUpdates);
+
+  // 边高亮
+  var eUpdates = [];
+  edges.forEach(function (edge) {
+    if (relatedEdgeIds.has(edge.id)) {
+      eUpdates.push({
+        id: edge.id,
+        color: { color: EDGE_HL, highlight: EDGE_HL },
+        width: 2.8
+      });
+    } else {
+      eUpdates.push({
+        id: edge.id,
+        color: { color: EDGE_FADE, highlight: EDGE_FADE },
+        width: 1.0
+      });
+    }
+  });
+  edges.update(eUpdates);
+}
+
+// =========================================================
+// 7. STEP 详情 Modal
+// =========================================================
+var modalOverlay = document.getElementById('stepModal');
+var modalTitle = document.getElementById('modalTitle');
+var modalBody = document.getElementById('modalBody');
+
+function openStepModal(stepId) {
+  var step = stepDefs.find(function (s) { return s.id === stepId; });
+  if (!step) return;
+  modalTitle.textContent = step.stepName + ' · ' + step.program;
+  var readList = step.read.length
+    ? '<ul class="dsn-list">' + step.read.map(function (d) {
+        var info = dsnDefs[d];
+        return '<li>' + info.physicalName +
+               '<span class="logical">' + info.logicalName + '</span></li>';
+      }).join('') + '</ul>'
+    : '<div style="color:#999;">（无）</div>';
+  var writeList = step.write.length
+    ? '<ul class="dsn-list">' + step.write.map(function (d) {
+        var info = dsnDefs[d];
+        return '<li>' + info.physicalName +
+               '<span class="logical">' + info.logicalName + '</span></li>';
+      }).join('') + '</ul>'
+    : '<div style="color:#999;">（无）</div>';
+  modalBody.innerHTML =
+    '<div class="info-row"><div class="k">STEP 名</div><div class="v">' + step.stepName + '</div></div>' +
+    '<div class="info-row"><div class="k">程序</div><div class="v">' + step.program + '</div></div>' +
+    '<div class="info-row"><div class="k"><span class="badge read">读</span></div><div class="v">' + readList + '</div></div>' +
+    '<div class="info-row"><div class="k"><span class="badge write">写</span></div><div class="v">' + writeList + '</div></div>';
+  modalOverlay.classList.add('active');
+}
+function closeModal() {
+  modalOverlay.classList.remove('active');
+}
+modalOverlay.addEventListener('click', function (e) {
+  if (e.target === modalOverlay) closeModal();
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closeModal();
+});
+
+// =========================================================
+// 8. 事件绑定
+// =========================================================
+network.on('selectNode', function (params) {
+  if (params.nodes.length !== 1) return;
+  var nodeId = params.nodes[0];
+  var node = nodes.get(nodeId);
+  if (node._type === 'step') {
+    resetStyles();
+    openStepModal(nodeId);
+  } else if (node._type === 'dsn') {
+    highlightDsn(nodeId);
+  }
+});
+network.on('click', function (params) {
+  if (params.nodes.length === 0 && params.edges.length === 0) {
+    resetStyles();
+  }
+});
+
+// =========================================================
+// 9. 初始化适配视图
+// =========================================================
+network.once('stabilized', function () {
+  network.fit({ animation: true });
+});
+</script>
+</body>
+</html>
